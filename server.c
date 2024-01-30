@@ -102,7 +102,6 @@ void handle_get_request(struct HTTP_Request request, int client_socket) {
     }
 }
 
-
 void handle_not_allowed_method(int client_socket) {
     char response[] = "HTTP/1.1 405 Method Not Allowed\r\n"
     	  "Server: Custom HTTP server\r\n"
@@ -114,4 +113,32 @@ void handle_not_allowed_method(int client_socket) {
     	  "</p></body></html>";
     
     send(client_socket, response, strlen(response), 0);
+}
+
+
+void handle_client_request(struct HTTP_Request request, int client_socket) {
+    // HTML-form for client
+    char *html_response = "HTTP/1.1 200 OK\r\n"
+                         "Content-Type: text/html\r\n"
+                         "\r\n"
+                         "<html><head><title>HTTP Method Tester</title></head>"
+                         "<body><h2>HTTP Method Tester</h2>"
+                         "<form method=\"GET\">"
+                         "<label for=\"path\">Enter file path:</label>"
+                         "<input type=\"text\" id=\"path\" name=\"path\">"
+                         "<input type=\"submit\" value=\"Get File\">"
+                         "</form>"
+                         "</body></html>";
+
+    send(client_socket, html_response, strlen(html_response), 0);
+
+     if (strcmp(request.method, "GET") == 0 && strlen(request.path) != 0) {
+     	if (request.path[0] == '/') {
+		memmove(request.path, request.path + 1, strlen(request.path));
+		printf("file path is changed: %s\n", request.path);
+	}
+        handle_get_request(request, client_socket);
+    } else if (strcmp(request.method, "GET") != 0) {
+        handle_not_allowed_method(client_socket);
+    }
 }
