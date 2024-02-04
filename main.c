@@ -14,10 +14,14 @@ void handler(int) {
 
 int main() {
 	int server_socket;
-	server_init(&server_socket);
+
+	if (server_init(&server_socket) == EXIT_FAILURE) {
+		return 1;
+	}
 
 	signal(SIGINT, handler);
 
+// server_run(args...) {
 	while (flag) {
 	    struct sockaddr_in client_addr;
 	    socklen_t client_addr_len = sizeof(client_addr);
@@ -44,6 +48,7 @@ int main() {
 	    printf("file: %s\n", request.path);
 	    
 	    
+	//	GET / file_name/version
 	    
 	    if (strcmp(request.path, "/") == 0) {
 	    	printf("\nclient request\n");
@@ -68,7 +73,7 @@ int main() {
 				char* ptr1 = request.path;
 				char* ptr2 = request.path;
 				
-				while (*ptr1) {
+				while (*ptr1) {  //file/file.txt
 					if (strncmp(ptr1, "%2F", 3) == 0) {
 						*ptr2++ = '/';
             					ptr1 += 3;

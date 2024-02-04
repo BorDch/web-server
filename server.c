@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -27,10 +28,10 @@ struct HTTP_Request {
 
 
 // Function for initializing the server using sockets
-void server_init(int *server_socket) {
+int server_init(int *server_socket) {
     if ((*server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("server: socket: ");
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     struct sockaddr_in server_addr;
@@ -45,12 +46,12 @@ void server_init(int *server_socket) {
 
     if (bind(*server_socket, (struct sockaddr*) &server_addr, sizeof(server_addr)) == -1) {
         perror("server: bind: ");
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     if (listen(*server_socket, MAX_CLIENTS) == -1) {
         perror("server: listen: ");
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 }
 
@@ -62,45 +63,72 @@ void handle_get_request(struct HTTP_Request request, int client_socket) {
         struct stat filestats;
         // Getting information about file
         if (stat(request.path, &filestats) != -1) {
+            // Read file's content
             char *body = (char*) calloc(filestats.st_size, sizeof(char));
-	    read(fd, body, filestats.st_size);
-            //char response[] = "HTTP/1.1 200 OK\r\nServer: Custom HTTP server\r\nContent-Type: text/html\r\n\r\n";
-            char response[] = "HTTP/1.1 200 OK\nServer: Custom HTTP server\nContent-Type: text/html\nContent-length: 72\n\n";
-            size_t size = strlen(response) + strlen(body);
-	    char *final = (char*) calloc(size, sizeof(char));
-	    strcat(final, response);
-	    strcat(final, body);
+            read(fd, body, filestats.st_size);
+
+            // Defining the MIME-type according to the file extension
+            char content_type[50];
+            if (strstr(request.path, ".html")) {
+                strcpy(content_type, "text/html");
+            } else if (strstr(request.path, ".txt")) {
+                strcpy(content_type, "text/plain");
+            } else if (strstr(request.path, ".png")) {
+                strcpy(content_type, "image/png");
+            } else if (strstr(request.path, ".gif")) {
+                strcpy(content_type, "image/gif");
+            } else if (strstr(request.path, ".jpeg")) {
+                strcpy(content_type, "image/jpeg"); 
+            } else if (strstr(request.path, ".pdf")) {
+            	strcpy(content_type, "application/pdf");
+            } else {
+                // If MIME-type is undefined, then use common type: application/octet-stream
+                strcpy(content_type, "application/octet-stream");
+            }
+
+            // Make header: Content-Type
+            char content_type_header[100];
+            sprintf(content_type_header, "Content-Type: %s\n", content_type);
+
+            // Make header: Date
+            time_t rawtime;
+            struct tm *timeinfo;
+            char date_header[100];
+            time(&rawtime);
+            timeinfo = gmtime(&rawtime);
+            strftime(date_header, sizeof(date_header), "Date: %a, %d %b %Y %H:%M:%S GMT\n", timeinfo);
+
+            // Make header: Allow
+            char allow_header[] = "Allow: GET\n";
+
+            // Формируем заголовок Last-modified
+            char last_modified_header[100];
+            strftime(last_modified_header, sizeof(last_modified_header), "Last-Modified: %a, %d %b %Y %H:%M:%S GMT\n", gmtime(&filestats.st_mtime));
+
+            // Формируем HTTP-ответ
+            char response[1024];
+            sprintf(response, "HTTP/1.1 200 OK\nServer: Custom HTTP server\n%s%s%s%sContent-length: %ld\n\n", content_type_header, date_header, allow_header, last_modified_header, filestats.st_size);
+
             // Send responce title to client
-            write(client_socket, final, size);
+            write(client_socket, response, strlen(response));
+            write(client_socket, body, filestats.st_size);
             
             printf("Response has been successfully sent to client:\n%s", response);
         } else {
             // Getting information error
-            char response[] = "HTTP/1.1 500 Internal Server Error\r\n"
-            	  "Server: Custom HTTP server\r\n"
-                  "Content-Type: text/html\r\n\r\n"
-                  "<html><head><title>500 Internal Server Error</title></head>"
-                  "<body><h1>500 Internal Server Error</h1><p>Internal server error."
-                  "Please try to repeat the request later or contact the site administrator."
-                  "</p></body></html>";
-            
+            char response[] = "HTTP/1.1 500 Internal Server Error\nServer: Custom HTTP server\nContent-Type: text/html\n\n<html><head><title>500 Internal Server Error</title></head><body><h1>500 Internal Server Error</h1><p>Internal server error. Please try to repeat the request later or contact the site administrator.</p></body></html>";
             write(client_socket, response, strlen(response));
             printf("Error 500 Internal Server Error occurred, the following response code was sent:\n%s", response);
         }
         close(fd);
     } else {
         // If requested file doesn't exist
-        char response[] = "HTTP/1.1 404 Not Found\r\n"
-              "Server: Custom HTTP server\r\n"
-              "Content-Type: text/html\r\n\r\n"
-              "<html><head><title>404 Not Found</title></head>"
-              "<body><h1>404 Not Found</h1><p>The requested URL was not found on this server."
-              "</p></body></html>";
-        
+        char response[] = "HTTP/1.1 404 Not Found\nServer: Custom HTTP server\nContent-Type: text/html\n\n<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>";
         write(client_socket, response, strlen(response));
         printf("File was not found, the '404 Not Found' response code was sent:\n%s", response);
     }
 }
+
 
 void handle_not_allowed_method(int client_socket) {
     char response[] = "HTTP/1.1 405 Method Not Allowed\r\n"

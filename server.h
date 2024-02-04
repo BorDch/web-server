@@ -16,7 +16,7 @@
 
 
 
-void server_init(int *server_socket);
+int server_init(int *server_socket);
 void handle_get_request(struct HTTP_Request request, int client_socket);
 void handle_not_allowed_method(int client_socket);
 void handle_client_request(struct HTTP_Request request, int client_socket);
