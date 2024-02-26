@@ -19,6 +19,12 @@
 #define PORT 8080
 
 
+volatile sig_atomic_t flag = 1;
+
+void handler(int) {
+	flag = 0;
+}
+
 struct HTTP_Request {
         char* method; // HTTP-methods: GET, HEAD, POST, ...
         char* path;  // Path to requested resource
@@ -52,97 +58,6 @@ int server_init(int *server_socket) {
                 perror("server: listen: ");
                 return EXIT_FAILURE;
         }
-}
-
-
-void handle_not_exist_error(int client_socket, char date_header[], char allow_header[]);
-void handle_internal_server_error(int client_socket, char date_header[], char allow_header[]);
-
-
-void handle_get_request(struct HTTP_Request request, int client_socket) {
-	// Open requested file
-	printf("HERE FILE %s\n", request.path);
-	int fd = open(request.path, O_RDONLY);
-
-	// Make header: Date
-	time_t rawtime;
-	struct tm *timeinfo;
-	char date_header[100];
-	time(&rawtime);
-	timeinfo = gmtime(&rawtime);
-	strftime(date_header, sizeof(date_header), "Date: %a, %d %b %Y %H:%M:%S GMT\n", timeinfo);
-    
-	// Make header: Allow
-	char allow_header[] = "Allow: GET\n";
-
-	if (fd != -1) {
-		struct stat filestats;
-        	// Getting information about file
-        	if (stat(request.path, &filestats) != -1) {
-            		printf("successfully opened\n");
-			// Read file's content
-			char *body = (char*) calloc(filestats.st_size, sizeof(char));
-			read(fd, body, filestats.st_size);
-
-			// Defining the MIME-type according to the file extension
-			char content_type[50];
-			if (strstr(request.path, ".html")) {
-				strcpy(content_type, "text/html");
-                
-			} else if (strstr(request.path, ".css")) {
-				strcpy(content_type, "text/css");
-
-			} else if (strstr(request.path, ".txt")) {
-				strcpy(content_type, "text/plain");
-
-			} else if (strstr(request.path, ".png")) {
-				strcpy(content_type, "image/png");
-
-			} else if (strstr(request.path, ".gif")) {
-				strcpy(content_type, "image/gif");
-
-			} else if (strstr(request.path, ".jpeg")) {
-				strcpy(content_type, "image/jpeg"); 
-
-			} else if (strstr(request.path, ".ico")) {
-				strcpy(content_type, "image/vnd.microsoft.icon"); 
-
-			} else if (strstr(request.path, ".pdf")) {
-				strcpy(content_type, "application/pdf");
-
-			} else {
-				// If MIME-type is undefined, then use common type: application/octet-stream
-				strcpy(content_type, "application/octet-stream");
-			}
-
-			// Make header: Content-Type
-			char content_type_header[100];
-			sprintf(content_type_header, "Content-Type: %s\n", content_type);
-
-			// Make header: Last-modified
-			char last_modified_header[100];
-			strftime(last_modified_header, sizeof(last_modified_header), "Last-Modified: %a, %d %b %Y %H:%M:%S GMT\n", gmtime(&filestats.st_mtime));
-
-			// Make HTTP-response
-			char response[1024];
-			sprintf(response, "HTTP/1.1 200 OK\nServer: Custom HTTP server\n%s%s%s%sContent-length: %ld\n\n", content_type_header, date_header, allow_header, last_modified_header, filestats.st_size);
-
-			// Send responce title to client
-			write(client_socket, response, strlen(response));
-			write(client_socket, body, filestats.st_size);
-
-			printf("Response has been successfully sent to client:\n%s", response);
-			free(body);
-		} else {
-			// Getting information error
-		   	handle_internal_server_error(client_socket, date_header, allow_header);
-		}
-		
-		close(fd);
-	} else {
-		// If requested file doesn't exist     
-		handle_not_exist_error(client_socket, date_header, allow_header);
-	}
 }
 
 
@@ -203,27 +118,98 @@ void handle_internal_server_error(int client_socket, char date_header[], char al
 }
 
 
+void handle_get_request(struct HTTP_Request request, int client_socket) {
+	// Open requested file
+	printf("HERE FILE %s\n", request.path);
+	int fd = open(request.path, O_RDONLY);
+
+	// Make header: Date
+	time_t rawtime;
+	struct tm *timeinfo;
+	char date_header[100];
+	time(&rawtime);
+	timeinfo = gmtime(&rawtime);
+	strftime(date_header, sizeof(date_header), "Date: %a, %d %b %Y %H:%M:%S GMT\n", timeinfo);
+    
+	// Make header: Allow
+	char allow_header[] = "Allow: GET\r\n";
+
+	if (fd != -1) {
+		struct stat filestats;
+        	// Getting information about file
+        	if (stat(request.path, &filestats) != -1) {
+            		printf("successfully opened\n");
+			// Read file's content
+			char *body = (char*) calloc(filestats.st_size, sizeof(char));
+			read(fd, body, filestats.st_size);
+
+			// Defining the MIME-type according to the file extension
+			char content_type[50];
+			if (strstr(request.path, ".html")) {
+				strcpy(content_type, "text/html");
+                
+			} else if (strstr(request.path, ".css")) {
+				strcpy(content_type, "text/css");
+
+			} else if (strstr(request.path, ".txt")) {
+				strcpy(content_type, "text/plain");
+
+			} else if (strstr(request.path, ".png")) {
+				strcpy(content_type, "image/png");
+
+			} else if (strstr(request.path, ".gif")) {
+				strcpy(content_type, "image/gif");
+
+			} else if (strstr(request.path, ".jpeg")) {
+				strcpy(content_type, "image/jpeg"); 
+
+			} else if (strstr(request.path, ".ico")) {
+				strcpy(content_type, "image/vnd.microsoft.icon"); 
+
+			} else if (strstr(request.path, ".pdf")) {
+				strcpy(content_type, "application/pdf");
+
+			} else {
+				// If MIME-type is undefined, then use common type: application/octet-stream
+				strcpy(content_type, "application/octet-stream");
+			}
+
+			// Make header: Content-Type
+			char content_type_header[100];
+			sprintf(content_type_header, "Content-Type: %s\r\n", content_type);
+
+			// Make header: Last-modified
+			char last_modified_header[100];
+			strftime(last_modified_header, sizeof(last_modified_header), "Last-Modified: %a, %d %b %Y %H:%M:%S GMT\r\n", gmtime(&filestats.st_mtime));
+
+			// Make HTTP-response
+			char response[1024];
+			sprintf(response, "HTTP/1.1 200 OK\nServer: Custom HTTP server\r\n%s%s%s%sContent-length: %ld\r\n\r\n", content_type_header, date_header, allow_header, last_modified_header, filestats.st_size);
+
+			// Send responce title to client
+			send(client_socket, response, strlen(response), 0);
+			send(client_socket, body, filestats.st_size, 0);
+
+			printf("Response has been successfully sent to client:\n%s", response);
+			free(body);
+		} else {
+			// Getting information error
+		   	handle_internal_server_error(client_socket, date_header, allow_header);
+		}
+		
+		close(fd);
+	} else {
+		// If requested file doesn't exist     
+		handle_not_exist_error(client_socket, date_header, allow_header);
+	}
+}
+
+
 void handle_client_request(struct HTTP_Request request, int client_socket) {
-	// HTML-form for client
-
-	char *html_response = "HTTP/1.1 200 OK\r\n"
-		         "Content-Type: text/html\r\n"
-		         "\r\n"
-		         "<html><head><title>HTTP Method Tester</title></head>"
-		         "<body><h2>HTTP Method Tester</h2>"
-		         "<form method=\"GET\">"
-		         "<label for=\"path\">Enter file path:</label>"
-		         "<input type=\"text\" id=\"path\" name=\"path\">"
-		         "<input type=\"submit\" value=\"Get File\">"
-		         "</form>"
-		         "</body></html>";
-
-	send(client_socket, html_response, strlen(html_response), 0);
-
 	if (strcmp(request.method, "GET") == 0 && strlen(request.path) != 0) {
 		if (request.path[0] == '/') {
 			memmove(request.path, request.path + 1, strlen(request.path));
-			printf("file path is changed: %s\n", request.path);
+			printf("\nfile path is changed: %s\n", request.path);
 		}
 		
 		handle_get_request(request, client_socket);
@@ -231,4 +217,137 @@ void handle_client_request(struct HTTP_Request request, int client_socket) {
 	} else if (strcmp(request.method, "GET") != 0) {
 		handle_not_allowed_method(client_socket);
 	}
+}
+
+
+// Request parse function. It reformates the client request
+void parse_request(const char *buffer, char *method, char *path, char *version) {
+	int i = 0, j = 0;
+
+	// Method parsing
+	while (buffer[i] != ' ' && buffer[i] != '\0') {
+		method[j++] = buffer[i++];
+	}
+	
+	method[j] = '\0';
+
+	i++;
+	j = 0;
+
+	// Path parsing
+	while (buffer[i] != ' ' && buffer[i] != '\0') {
+		path[j++] = buffer[i++];
+	}
+	
+	path[j] = '\0';
+
+	i++;
+	j = 0;
+
+	// Version parsing
+	while (buffer[i] != '\r' && buffer[i] != '\n' && buffer[i] != '\0') {
+		version[j++] = buffer[i++];
+	}
+	
+	version[j] = '\0';
+}
+
+
+// Function for server process running (from request getting to send responce to client) 
+int server_run(int server_socket) {
+	fd_set readfds;
+	int client_sockets[MAX_CLIENTS] = {0};
+	int max_sd, activity, new_socket;
+
+	while (flag) {
+		FD_ZERO(&readfds);
+		FD_SET(server_socket, &readfds);
+		max_sd = server_socket;
+
+		for (int i = 0; i < MAX_CLIENTS; i++) {
+		    if (client_sockets[i] > 0) {
+			FD_SET(client_sockets[i], &readfds);
+			
+			if (client_sockets[i] > max_sd) {
+			    max_sd = client_sockets[i];
+			}
+		    }
+		}
+
+		errno = 0;
+		activity = select(max_sd + 1, &readfds, NULL, NULL, NULL);
+
+		if ((activity < 0) && (errno != EINTR)) {
+		    printf("\nselect error\nerrno - %d\n", errno);
+		    
+		}
+
+		if (FD_ISSET(server_socket, &readfds)) {
+			struct sockaddr_in client_addr;
+			socklen_t client_addr_len = sizeof(client_addr);
+			new_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
+
+			if (new_socket < 0) {
+				perror("server: accept: ");
+				return 1;
+			}
+
+			for (int i = 0; i < MAX_CLIENTS; i++) {
+				if (client_sockets[i] == 0) {
+					client_sockets[i] = new_socket;
+					break;
+				}
+			}
+		}
+
+		for (int i = 0; i < MAX_CLIENTS; i++) {
+			int sd = client_sockets[i];
+			if (FD_ISSET(sd, &readfds)) {
+				struct HTTP_Request *request = (struct HTTP_Request *)malloc(sizeof(struct HTTP_Request));
+				
+				if (request == NULL) {
+					perror("server: malloc: ");
+					continue;
+				}
+
+				request->method = (char*)malloc(10 * sizeof(char));
+				request->path = (char*)malloc(255 * sizeof(char));
+				request->version = (char*)malloc(10 * sizeof(char));
+
+				// Read request
+				char buffer[1024];
+				ssize_t bytes_read = read(sd, buffer, 1024);
+				ssize_t buf_size;
+				
+				ioctl(sd, FIONREAD, &buf_size);
+				printf("Buffer size: %ld\n", buf_size);
+				
+				if (bytes_read > 0) {
+					buffer[bytes_read] = '\0';
+					parse_request(buffer, request->method, request->path, request->version);
+					handle_client_request(*request, sd);
+
+					client_sockets[i] = 0;
+					close(sd);
+					
+				} else if (bytes_read == 0) {
+					printf("Empty buffer\n");
+					client_sockets[i] = 0;
+					close(sd);
+					
+				} else {
+					perror("\nserver: read: ");
+					client_sockets[i] = 0;
+					close(sd);
+				}
+
+				free(request->method);
+				free(request->path);
+				free(request->version);
+				free(request);
+			}
+		}
+	}
+	
+	return 0;
 }
