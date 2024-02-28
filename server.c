@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/ioctl.h>
+#include <pthread.h>
 
 #include <sys/select.h>
 #include <sys/stat.h>
@@ -16,6 +17,7 @@
 
 
 #define MAX_CLIENTS 5
+#define MAX_SIZE 1024
 #define PORT 8080
 
 
@@ -29,6 +31,13 @@ struct HTTP_Request {
         char* method; // HTTP-methods: GET, HEAD, POST, ...
         char* path;  // Path to requested resource
         char* version; // Protocol version: 1.1 or 1.0 for example
+};
+
+
+struct ClientSocketArgs {
+	int client_socket;
+	int* client_sockets;
+	fd_set* readfds;
 };
 
 
@@ -253,6 +262,64 @@ void parse_request(const char *buffer, char *method, char *path, char *version) 
 }
 
 
+void *client_handler(void *arg) {
+	struct ClientSocketArgs *client_args = (struct ClientSocketArgs *)arg;
+	int client_socket = client_args->client_socket;
+	int* client_sockets = client_args->client_sockets;
+	fd_set* readfds = client_args->readfds;
+
+	struct HTTP_Request *request = (struct HTTP_Request *)malloc(sizeof(struct HTTP_Request));
+
+	if (request == NULL) {
+		perror("client_handler: malloc: ");
+		close(client_socket);
+		pthread_exit(NULL);
+	}
+
+	request->method = (char*)malloc(10 * sizeof(char));
+	request->path = (char*)malloc(255 * sizeof(char));
+	request->version = (char*)malloc(10 * sizeof(char));
+
+	char buffer[MAX_SIZE];
+	ssize_t bytes_read = read(client_socket, buffer, MAX_SIZE);
+	ssize_t buf_size;
+				
+	ioctl(sd, FIONREAD, &buf_size);
+	printf("Buffer size: %ld\n", buf_size);
+
+    
+	if (bytes_read < 0) {
+		perror("client_handler: read: ");
+		free(request->method);
+		free(request->path);
+		free(request->version);
+		free(request);
+		close(client_socket);
+		pthread_exit(NULL);
+	}
+
+	buffer[bytes_read] = '\0';
+	parse_request(buffer, request->method, request->path, request->version);
+	handle_client_request(*request, client_socket);
+
+	free(request->method);
+	free(request->path);
+	free(request->version);
+	free(request);
+	close(client_socket);
+
+	for (int i = 0; i < MAX_CLIENTS; i++) {
+		if(client_sockets[i] == client_socket) {
+			FD_CLR(client_socket, readfds);
+			client_sockets[i] = 0;
+			break;
+		}
+	}
+
+	pthread_exit(NULL);
+}
+
+
 // Function for server process running (from request getting to send responce to client) 
 int server_run(int server_socket) {
 	fd_set readfds;
@@ -265,21 +332,20 @@ int server_run(int server_socket) {
 		max_sd = server_socket;
 
 		for (int i = 0; i < MAX_CLIENTS; i++) {
-		    if (client_sockets[i] > 0) {
-			FD_SET(client_sockets[i], &readfds);
-			
-			if (client_sockets[i] > max_sd) {
-			    max_sd = client_sockets[i];
-			}
-		    }
-		}
+			if (client_sockets[i] > 0) {
+				FD_SET(client_sockets[i], &readfds);
+
+				if (client_sockets[i] > max_sd) {
+					max_sd = client_sockets[i];
+				}
+		    	}
+		}	
 
 		errno = 0;
 		activity = select(max_sd + 1, &readfds, NULL, NULL, NULL);
 
 		if ((activity < 0) && (errno != EINTR)) {
-		    printf("\nselect error\nerrno - %d\n", errno);
-		    
+			printf("\nselect error\nerrno - %d\n", errno);
 		}
 
 		if (FD_ISSET(server_socket, &readfds)) {
@@ -298,56 +364,23 @@ int server_run(int server_socket) {
 					break;
 				}
 			}
-		}
 
-		for (int i = 0; i < MAX_CLIENTS; i++) {
-			int sd = client_sockets[i];
-			if (FD_ISSET(sd, &readfds)) {
-				struct HTTP_Request *request = (struct HTTP_Request *)malloc(sizeof(struct HTTP_Request));
-				
-				if (request == NULL) {
-					perror("server: malloc: ");
-					continue;
-				}
+			struct ClientSocketArgs args;
+			args.client_socket = new_socket;
+			args.client_sockets = client_sockets;
+			args.readfds = &readfds;
 
-				request->method = (char*)malloc(10 * sizeof(char));
-				request->path = (char*)malloc(255 * sizeof(char));
-				request->version = (char*)malloc(10 * sizeof(char));
-
-				// Read request
-				char buffer[1024];
-				ssize_t bytes_read = read(sd, buffer, 1024);
-				ssize_t buf_size;
-				
-				ioctl(sd, FIONREAD, &buf_size);
-				printf("Buffer size: %ld\n", buf_size);
-				
-				if (bytes_read > 0) {
-					buffer[bytes_read] = '\0';
-					parse_request(buffer, request->method, request->path, request->version);
-					handle_client_request(*request, sd);
-
-					client_sockets[i] = 0;
-					close(sd);
-					
-				} else if (bytes_read == 0) {
-					printf("Empty buffer\n");
-					client_sockets[i] = 0;
-					close(sd);
-					
-				} else {
-					perror("\nserver: read: ");
-					client_sockets[i] = 0;
-					close(sd);
-				}
-
-				free(request->method);
-				free(request->path);
-				free(request->version);
-				free(request);
+			// Create thread for client request handling
+			pthread_t thread_id;
+			if (pthread_create(&thread_id, NULL, client_handler, (void *)&args) != 0) {
+				perror("server: pthread_create: ");
+				close(new_socket);
+				continue;
 			}
+			
+			pthread_detach(thread_id); // Free thread resources after process finished
 		}
 	}
-	
+
 	return 0;
 }

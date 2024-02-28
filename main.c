@@ -13,8 +13,6 @@
 
 #include "server.h"
 
-#define MAX_SIZE 1024
-
 
 int main() {
 	int server_socket;
