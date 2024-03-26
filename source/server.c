@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -15,10 +16,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-
-#define MAX_CLIENTS 5
-#define MAX_SIZE 1024
-#define PORT 8080
+#include "server.h"
 
 
 volatile sig_atomic_t flag = 1;
@@ -26,19 +24,6 @@ volatile sig_atomic_t flag = 1;
 void handler(int) {
 	flag = 0;
 }
-
-struct HTTP_Request {
-        char* method; // HTTP-methods: GET, HEAD, POST, ...
-        char* path;  // Path to requested resource
-        char* version; // Protocol version: 1.1 or 1.0 for example
-};
-
-
-struct ClientSocketArgs {
-	int client_socket;
-	int* client_sockets;
-	fd_set* readfds;
-};
 
 
 // Function for initializing the server using sockets
@@ -67,6 +52,8 @@ int server_init(int *server_socket) {
                 perror("server: listen: ");
                 return EXIT_FAILURE;
         }
+        
+        return 0;
 }
 
 
@@ -193,10 +180,10 @@ void handle_get_request(struct HTTP_Request request, int client_socket) {
 
 			// Make HTTP-response
 			char response[1024];
-			sprintf(response, "HTTP/1.1 200 OK\nServer: Custom HTTP server\r\n%s%s%s%sContent-length: %ld\r\n\r\n", content_type_header, date_header, allow_header, last_modified_header, filestats.st_size);
+			sprintf(response, "HTTP/1.1 200 OK\r\nServer: Custom HTTP server\r\n%s%s%s%sContent-length: %ld\r\n\r\n", content_type_header, date_header, allow_header, last_modified_header, filestats.st_size);
 
 			// Send responce title to client
-			send(client_socket, response, strlen(response), 0);
+			//send(client_socket, response, strlen(response), 0);
 			send(client_socket, body, filestats.st_size, 0);
 
 			printf("Response has been successfully sent to client:\n%s", response);
@@ -213,6 +200,28 @@ void handle_get_request(struct HTTP_Request request, int client_socket) {
 	}
 }
 
+void handle_post_form_request(int client_socket, char *request_data) {
+    // Handle the POST data submitted from the form
+    printf("Received POST data: %s\n", request_data);
+}
+
+void handle_post_request(struct HTTP_Request request, int client_socket) {
+    if (strcmp(request.path, "/submit") == 0) {
+        // Extract request data from POST body
+        char *request_data = strstr(request.path, "\r\n\r\n");
+        if (request_data != NULL) {
+            request_data += 4; // Move past the "\r\n\r\n" sequence
+            handle_post_form_request(client_socket, request_data);
+        } else {
+            // Invalid POST data
+            handle_internal_server_error(client_socket, "", "");
+        }
+    } else {
+        // Invalid POST path
+        handle_not_exist_error(client_socket, "", "");
+    }
+}
+
 
 void handle_client_request(struct HTTP_Request request, int client_socket) {
 	if (strcmp(request.method, "GET") == 0 && strlen(request.path) != 0) {
@@ -223,50 +232,131 @@ void handle_client_request(struct HTTP_Request request, int client_socket) {
 		
 		handle_get_request(request, client_socket);
 	
-	} else if (strcmp(request.method, "GET") != 0) {
+	} else if (strcmp(request.method, "POST") == 0) {
+		printf("That is Post\n");
+		handle_post_request(request, client_socket);
+	} else if (strcmp(request.method, "GET") != 0 && strcmp(request.method, "POST") != 0) {
 		handle_not_allowed_method(client_socket);
 	}
 }
 
 
 // Request parse function. It reformates the client request
-void parse_request(const char *buffer, char *method, char *path, char *version) {
+void parse_request(const char *buffer, struct HTTP_Request* http_request) {
 	int i = 0, j = 0;
 
 	// Method parsing
 	while (buffer[i] != ' ' && buffer[i] != '\0') {
-		method[j++] = buffer[i++];
+		http_request->method[j++] = buffer[i++];
 	}
 	
-	method[j] = '\0';
-
-	i++;
-	j = 0;
-
-	// Path parsing
-	while (buffer[i] != ' ' && buffer[i] != '\0') {
-		path[j++] = buffer[i++];
-	}
+	http_request->method[j] = '\0';
 	
-	path[j] = '\0';
+	if (strcmp(http_request->method, "GET") == 0) {
+		// For GET request
+		i++;
+		j = 0;
 
-	i++;
-	j = 0;
+		// Path parsing
+		while (buffer[i] != ' ' && buffer[i] != '\0') {
+			http_request->path[j++] = buffer[i++];
+		}
+		
+		http_request->path[j] = '\0';
 
-	// Version parsing
-	while (buffer[i] != '\r' && buffer[i] != '\n' && buffer[i] != '\0') {
-		version[j++] = buffer[i++];
-	}
+		i++;
+		j = 0;
 	
-	version[j] = '\0';
+		// Version parsing
+		while (buffer[i] != '\r' && buffer[i] != '\n' && buffer[i] != '\0') {
+			http_request->version[j++] = buffer[i++];
+		}
+		
+		http_request->version[j] = '\0';
+		
+	} else if (strcmp(http_request->method, "POST") == 0) {
+		// Find the start of the request parameters
+		const char *params_start = strstr(buffer, "\r\n\r\n");
+		if (params_start != NULL) {
+			params_start += 4; // Move past "\r\n\r\n"
+
+			const char *request_start = strstr(params_start, "&request=");
+			if (request_start != NULL) {
+				// Find the end of the value (until '\0' or '&')
+				request_start += 9; // Move past "&request="
+				const char *request_end = strstr(request_start, "&");
+				if (request_end != NULL) {	
+			    		strncpy(http_request->path, request_start, request_end - request_start); // Copy the request value
+					http_request->path[request_end - request_start] = '\0'; // Null-terminate the string
+				} else {
+					strcpy(http_request->path, request_start); // Copy the request value
+				}
+			}
+			
+			const char *version_start = strstr(buffer, "HTTP/");
+			if (version_start != NULL) {
+		    		// Find the end of the HTTP version string (until '\0' or '\r' or '\n')
+		    		version_start += 5; // Move past "HTTP/"
+		    		const char *version_end = version_start;
+		    		while (*version_end != '\0' && *version_end != '\r' && *version_end != '\n') {
+					version_end++;
+		    		}
+
+		    		// Copy the HTTP version string to the request structure
+		    		strncpy(http_request->version, version_start, version_end - version_start);
+		    		http_request->version[version_end - version_start] = '\0'; // Null-terminate the string
+			}
+
+			// Find "name="
+		    	const char *name_start = strstr(params_start, "name=");
+			if (name_start != NULL) {
+		        	// Find the end of the value (until '&')
+		        	const char *name_end = strstr(name_start, "&");
+		        	if (name_end != NULL) {
+		        		strncpy(http_request->name, name_start + 5, name_end - (name_start + 5)); // Copy the name value
+		        		http_request->name[name_end - (name_start + 5)] = '\0'; // Null-terminate the string
+		        	}
+		    	}
+
+		    	// Find "dob="
+		    	const char *dob_start = strstr(params_start, "dob=");
+		    	if (dob_start != NULL) {
+		        	// Find the end of the value (until '&')
+		        	const char *dob_end = strstr(dob_start, "&");
+		        	if (dob_end != NULL) {
+		            		strncpy(http_request->dob, dob_start + 4, dob_end - (dob_start + 4)); // Copy the dob value
+		            		http_request->dob[dob_end - (dob_start + 4)] = '\0'; // Null-terminate the string
+		        	}
+		    	}
+		}
+	}
+}
+
+
+void send_html_form(int client_socket) {
+    char response[] = "HTTP/1.1 200 OK\r\n"
+                      "Server: Custom HTTP server\r\n"
+                      "Content-Type: text/html\r\n\r\n"
+                      "<html><head><title>POST Form</title></head>"
+                      "<body>"
+                      "<h1>Enter your request:</h1>"
+                      "<form action=\"/submit\" method=\"post\">"
+                      "Name: <input type=\"text\" name=\"name\"><br>"
+                      "Date of Birth: <input type=\"date\" name=\"dob\"><br>"
+                      "<textarea name=\"request\" rows=\"10\" cols=\"50\"></textarea><br>"
+                      "<input type=\"submit\" value=\"Submit\">"
+                      "</form>"
+                      "</body></html>";
+    send(client_socket, response, strlen(response), 0);
 }
 
 
 void *client_handler(void *arg) {
 	struct ClientSocketArgs *client_args = (struct ClientSocketArgs *)arg;
 	int client_socket = client_args->client_socket;
-	int* client_sockets = client_args->client_sockets;
-	fd_set* readfds = client_args->readfds;
+	fd_set readfds;
+	FD_ZERO(&readfds);
+	FD_SET(client_socket, &readfds);
 
 	struct HTTP_Request *request = (struct HTTP_Request *)malloc(sizeof(struct HTTP_Request));
 
@@ -279,13 +369,19 @@ void *client_handler(void *arg) {
 	request->method = (char*)malloc(10 * sizeof(char));
 	request->path = (char*)malloc(255 * sizeof(char));
 	request->version = (char*)malloc(10 * sizeof(char));
+	request->name = (char*)malloc(100 * sizeof(char));
+	request->dob = (char*)malloc(8 * sizeof(char));
 
+	send_html_form(client_socket);
+
+	select(client_socket + 1, &readfds, NULL, NULL, NULL);
 	char buffer[MAX_SIZE];
 	ssize_t bytes_read = read(client_socket, buffer, MAX_SIZE);
-	ssize_t buf_size;
-				
-	ioctl(sd, FIONREAD, &buf_size);
-	printf("Buffer size: %ld\n", buf_size);
+	printf("Buffer content:\n%s\n", buffer);
+//	ssize_t buf_size;
+
+//	ioctl(bytes_read, FIONREAD, &buf_size);
+//	printf("Buffer size: %ld\n", buf_size);
 
     
 	if (bytes_read < 0) {
@@ -293,28 +389,29 @@ void *client_handler(void *arg) {
 		free(request->method);
 		free(request->path);
 		free(request->version);
+		free(request->name);
+		free(request->dob);
 		free(request);
 		close(client_socket);
 		pthread_exit(NULL);
 	}
 
 	buffer[bytes_read] = '\0';
-	parse_request(buffer, request->method, request->path, request->version);
+	parse_request(buffer, request);
+	printf("Method is %s\n", request->method);
+	printf("Path is %s\n", request->path);
+	printf("Version is %s\n", request->version);
+	printf("User name is %s\n", request->name);
+	printf("User Date of Birth is %s\n", request->dob);
 	handle_client_request(*request, client_socket);
 
 	free(request->method);
 	free(request->path);
 	free(request->version);
+	free(request->name);
+	free(request->dob);
 	free(request);
 	close(client_socket);
-
-	for (int i = 0; i < MAX_CLIENTS; i++) {
-		if(client_sockets[i] == client_socket) {
-			FD_CLR(client_socket, readfds);
-			client_sockets[i] = 0;
-			break;
-		}
-	}
 
 	pthread_exit(NULL);
 }
@@ -323,26 +420,13 @@ void *client_handler(void *arg) {
 // Function for server process running (from request getting to send responce to client) 
 int server_run(int server_socket) {
 	fd_set readfds;
-	int client_sockets[MAX_CLIENTS] = {0};
-	int max_sd, activity, new_socket;
 
 	while (flag) {
 		FD_ZERO(&readfds);
 		FD_SET(server_socket, &readfds);
-		max_sd = server_socket;
-
-		for (int i = 0; i < MAX_CLIENTS; i++) {
-			if (client_sockets[i] > 0) {
-				FD_SET(client_sockets[i], &readfds);
-
-				if (client_sockets[i] > max_sd) {
-					max_sd = client_sockets[i];
-				}
-		    	}
-		}	
 
 		errno = 0;
-		activity = select(max_sd + 1, &readfds, NULL, NULL, NULL);
+		int activity = select(server_socket + 1, &readfds, NULL, NULL, NULL);
 
 		if ((activity < 0) && (errno != EINTR)) {
 			printf("\nselect error\nerrno - %d\n", errno);
@@ -351,23 +435,15 @@ int server_run(int server_socket) {
 		if (FD_ISSET(server_socket, &readfds)) {
 			struct sockaddr_in client_addr;
 			socklen_t client_addr_len = sizeof(client_addr);
-			new_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
+			int new_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
 
 			if (new_socket < 0) {
 				perror("server: accept: ");
 				return 1;
 			}
 
-			for (int i = 0; i < MAX_CLIENTS; i++) {
-				if (client_sockets[i] == 0) {
-					client_sockets[i] = new_socket;
-					break;
-				}
-			}
-
 			struct ClientSocketArgs args;
 			args.client_socket = new_socket;
-			args.client_sockets = client_sockets;
 			args.readfds = &readfds;
 
 			// Create thread for client request handling
@@ -377,7 +453,7 @@ int server_run(int server_socket) {
 				close(new_socket);
 				continue;
 			}
-			
+
 			pthread_detach(thread_id); // Free thread resources after process finished
 		}
 	}
