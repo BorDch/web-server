@@ -128,7 +128,7 @@ void handle_get_request(struct HTTP_Request request, int client_socket) {
 	strftime(date_header, sizeof(date_header), "Date: %a, %d %b %Y %H:%M:%S GMT\n", timeinfo);
     
 	// Make header: Allow
-	char allow_header[] = "Allow: GET\r\n";
+	char allow_header[] = "Allow: GET, POST\r\n";
 
 	if (fd != -1) {
 		struct stat filestats;
@@ -200,26 +200,98 @@ void handle_get_request(struct HTTP_Request request, int client_socket) {
 	}
 }
 
-void handle_post_form_request(int client_socket, char *request_data) {
-    // Handle the POST data submitted from the form
-    printf("Received POST data: %s\n", request_data);
-}
 
 void handle_post_request(struct HTTP_Request request, int client_socket) {
-    if (strcmp(request.path, "/submit") == 0) {
-        // Extract request data from POST body
-        char *request_data = strstr(request.path, "\r\n\r\n");
-        if (request_data != NULL) {
-            request_data += 4; // Move past the "\r\n\r\n" sequence
-            handle_post_form_request(client_socket, request_data);
-        } else {
-            // Invalid POST data
-            handle_internal_server_error(client_socket, "", "");
-        }
-    } else {
-        // Invalid POST path
-        handle_not_exist_error(client_socket, "", "");
-    }
+    // Open requested file
+	printf("HERE FILE %s\n", request.path);
+	int fd = open(request.path, O_RDONLY);
+
+	// Make header: Date
+	time_t rawtime;
+	struct tm *timeinfo;
+	char date_header[100];
+	time(&rawtime);
+	timeinfo = gmtime(&rawtime);
+	strftime(date_header, sizeof(date_header), "Date: %a, %d %b %Y %H:%M:%S GMT\n", timeinfo);
+    
+	// Make header: Allow
+	char allow_header[] = "Allow: GET, POST\r\n";
+
+	if (fd != -1) {
+		struct stat filestats;
+        	// Getting information about file
+        	if (stat(request.path, &filestats) != -1) {
+            		printf("successfully opened\n");
+			// Read file's content
+			char *body = (char*) calloc(filestats.st_size, sizeof(char));
+			read(fd, body, filestats.st_size);
+
+			// Defining the MIME-type according to the file extension
+			char content_type[50];
+			if (strstr(request.path, ".html")) {
+				strcpy(content_type, "text/html");
+                
+			} else if (strstr(request.path, ".css")) {
+				strcpy(content_type, "text/css");
+
+			} else if (strstr(request.path, ".txt")) {
+				strcpy(content_type, "text/plain");
+
+			} else if (strstr(request.path, ".png")) {
+				strcpy(content_type, "image/png");
+
+			} else if (strstr(request.path, ".gif")) {
+				strcpy(content_type, "image/gif");
+
+			} else if (strstr(request.path, ".jpeg")) {
+				strcpy(content_type, "image/jpeg"); 
+
+			} else if (strstr(request.path, ".ico")) {
+				strcpy(content_type, "image/vnd.microsoft.icon"); 
+
+			} else if (strstr(request.path, ".pdf")) {
+				strcpy(content_type, "application/pdf");
+
+			} else {
+				// If MIME-type is undefined, then use common type: application/octet-stream
+				strcpy(content_type, "application/octet-stream");
+			}
+
+			// Make header: Content-Type
+			char content_type_header[100];
+			sprintf(content_type_header, "Content-Type: %s\r\n", content_type);
+
+			// Make header: Last-modified
+			char last_modified_header[100];
+			strftime(last_modified_header, sizeof(last_modified_header), "Last-Modified: %a, %d %b %Y %H:%M:%S GMT\r\n", gmtime(&filestats.st_mtime));
+
+			// Make HTTP-response
+			char response[1024];
+			sprintf(response, "HTTP/1.1 200 OK\r\nServer: Custom HTTP server\r\n%s%s%s%sContent-length: %ld\r\n\r\n", content_type_header, date_header, allow_header, last_modified_header, filestats.st_size);
+
+			// Send responce title to client
+			//send(client_socket, response, strlen(response), 0);
+			send(client_socket, body, filestats.st_size, 0);
+			
+			// Form days until next user birthday
+			int days_until_birthday = birthday_evaluate(request.dob);
+			char birthday_info[100];
+			 
+			sprintf(birthday_info, "Days until next birthday: %d\n", days_until_birthday);
+			send(client_socket, birthday_info, strlen(birthday_info), 0);
+			
+			printf("Response has been successfully sent to client:\n%s", response);
+			free(body);
+		} else {
+			// Getting information error
+		   	handle_internal_server_error(client_socket, date_header, allow_header);
+		}
+		
+		close(fd);
+	} else {
+		// If requested file doesn't exist     
+		handle_not_exist_error(client_socket, date_header, allow_header);
+	}
 }
 
 

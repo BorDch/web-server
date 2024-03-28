@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <time.h>
 #include <sys/ioctl.h>
 #include <sys/time.h>
 
@@ -50,8 +51,14 @@ void handle_not_allowed_method(int client_socket);
 void handle_not_exist_error(int client_socket, char date_header[], char allow_header[]);
 void handle_internal_server_error(int client_socket, char date_header[], char allow_header[]);
 void handle_get_request(struct HTTP_Request request, int client_socket);
+void handle_post_request(struct HTTP_Request request, int client_socket);
 void handle_client_request(struct HTTP_Request request, int client_socket);
 
 
 // For threads
 void *client_handler(void *arg);
+
+
+// For users bitrhday
+int ymd_to_ord(int year, int month, int day);
+int birthday_evaluate(char* user_dob);
