@@ -200,6 +200,28 @@ void handle_get_request(struct HTTP_Request request, int client_socket) {
 	}
 }
 
+void handle_post_form_request(int client_socket, char *request_data) {
+    // Handle the POST data submitted from the form
+    printf("Received POST data: %s\n", request_data);
+}
+
+void handle_post_request(struct HTTP_Request request, int client_socket) {
+    if (strcmp(request.path, "/submit") == 0) {
+        // Extract request data from POST body
+        char *request_data = strstr(request.path, "\r\n\r\n");
+        if (request_data != NULL) {
+            request_data += 4; // Move past the "\r\n\r\n" sequence
+            handle_post_form_request(client_socket, request_data);
+        } else {
+            // Invalid POST data
+            handle_internal_server_error(client_socket, "", "");
+        }
+    } else {
+        // Invalid POST path
+        handle_not_exist_error(client_socket, "", "");
+    }
+}
+
 
 void handle_post_request(struct HTTP_Request request, int client_socket) {
     // Open requested file
