@@ -52,6 +52,7 @@ void handle_not_exist_error(int client_socket, char date_header[], char allow_he
 void handle_internal_server_error(int client_socket, char date_header[], char allow_header[]);
 void handle_get_request(struct HTTP_Request request, int client_socket);
 void handle_post_request(struct HTTP_Request request, int client_socket);
+void handle_head_request(struct HTTP_Request request, int client_socket);
 void handle_client_request(struct HTTP_Request request, int client_socket);
 
 

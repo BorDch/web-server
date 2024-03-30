@@ -115,8 +115,6 @@ void handle_internal_server_error(int client_socket, char date_header[], char al
 
 
 void handle_get_request(struct HTTP_Request request, int client_socket) {
-	// Open requested file
-	printf("HERE FILE %s\n", request.path);
 	int fd = open(request.path, O_RDONLY);
 
 	// Make header: Date
@@ -128,7 +126,7 @@ void handle_get_request(struct HTTP_Request request, int client_socket) {
 	strftime(date_header, sizeof(date_header), "Date: %a, %d %b %Y %H:%M:%S GMT\n", timeinfo);
     
 	// Make header: Allow
-	char allow_header[] = "Allow: GET, POST\r\n";
+	char allow_header[] = "Allow: GET, POST, HEAD\r\n";
 
 	if (fd != -1) {
 		struct stat filestats;
@@ -202,8 +200,6 @@ void handle_get_request(struct HTTP_Request request, int client_socket) {
 
 
 void handle_post_request(struct HTTP_Request request, int client_socket) {
-    // Open requested file
-	printf("HERE FILE %s\n", request.path);
 	int fd = open(request.path, O_RDONLY);
 
 	// Make header: Date
@@ -215,7 +211,7 @@ void handle_post_request(struct HTTP_Request request, int client_socket) {
 	strftime(date_header, sizeof(date_header), "Date: %a, %d %b %Y %H:%M:%S GMT\n", timeinfo);
     
 	// Make header: Allow
-	char allow_header[] = "Allow: GET, POST\r\n";
+	char allow_header[] = "Allow: GET, POST, HEAD\r\n";
 
 	if (fd != -1) {
 		struct stat filestats;
@@ -295,11 +291,95 @@ void handle_post_request(struct HTTP_Request request, int client_socket) {
 }
 
 
+void handle_head_request(struct HTTP_Request request, int client_socket) {
+	int fd = open(request.path, O_RDONLY);
+
+	// Make header: Date
+	time_t rawtime;
+	struct tm *timeinfo;
+	char date_header[100];
+	time(&rawtime);
+	timeinfo = gmtime(&rawtime);
+	strftime(date_header, sizeof(date_header), "Date: %a, %d %b %Y %H:%M:%S GMT\n", timeinfo);
+    
+	// Make header: Allow
+	char allow_header[] = "Allow: GET, POST, HEAD\r\n";
+
+	if (fd != -1) {
+		struct stat filestats;
+        	// Getting information about file
+        	if (stat(request.path, &filestats) != -1) {
+            		printf("successfully opened\n");
+			// Read file's content
+			char *body = (char*) calloc(filestats.st_size, sizeof(char));
+			read(fd, body, filestats.st_size);
+
+			// Defining the MIME-type according to the file extension
+			char content_type[50];
+			if (strstr(request.path, ".html")) {
+				strcpy(content_type, "text/html");
+                
+			} else if (strstr(request.path, ".css")) {
+				strcpy(content_type, "text/css");
+
+			} else if (strstr(request.path, ".txt")) {
+				strcpy(content_type, "text/plain");
+
+			} else if (strstr(request.path, ".png")) {
+				strcpy(content_type, "image/png");
+
+			} else if (strstr(request.path, ".gif")) {
+				strcpy(content_type, "image/gif");
+
+			} else if (strstr(request.path, ".jpeg")) {
+				strcpy(content_type, "image/jpeg"); 
+
+			} else if (strstr(request.path, ".ico")) {
+				strcpy(content_type, "image/vnd.microsoft.icon"); 
+
+			} else if (strstr(request.path, ".pdf")) {
+				strcpy(content_type, "application/pdf");
+
+			} else {
+				// If MIME-type is undefined, then use common type: application/octet-stream
+				strcpy(content_type, "application/octet-stream");
+			}
+
+			// Make header: Content-Type
+			char content_type_header[100];
+			sprintf(content_type_header, "Content-Type: %s\r\n", content_type);
+
+			// Make header: Last-modified
+			char last_modified_header[100];
+			strftime(last_modified_header, sizeof(last_modified_header), "Last-Modified: %a, %d %b %Y %H:%M:%S GMT\r\n", gmtime(&filestats.st_mtime));
+
+			// Make HTTP-response
+			char response[1024];
+			sprintf(response, "HTTP/1.1 200 OK\r\nServer: Custom HTTP server\r\n%s%s%s%sContent-length: %ld\r\n\r\n", content_type_header, date_header, allow_header, last_modified_header, filestats.st_size);
+
+			// Send responce title to client
+			send(client_socket, response, strlen(response), 0);
+			//send(client_socket, body, filestats.st_size, 0);
+			 
+			printf("Response has been successfully sent to client:\n%s", response);
+			free(body);
+		} else {
+			// Getting information error
+		   	handle_internal_server_error(client_socket, date_header, allow_header);
+		}
+		
+		close(fd);
+	} else {
+		// If requested file doesn't exist     
+		handle_not_exist_error(client_socket, date_header, allow_header);
+	}
+}
+
+
 void handle_client_request(struct HTTP_Request request, int client_socket) {
 	if (strcmp(request.method, "GET") == 0 && strlen(request.path) != 0) {
 		if (request.path[0] == '/') {
 			memmove(request.path, request.path + 1, strlen(request.path));
-			printf("\nfile path is changed: %s\n", request.path);
 		}
 		
 		handle_get_request(request, client_socket);
@@ -307,7 +387,16 @@ void handle_client_request(struct HTTP_Request request, int client_socket) {
 	} else if (strcmp(request.method, "POST") == 0) {
 		printf("That is Post\n");
 		handle_post_request(request, client_socket);
-	} else if (strcmp(request.method, "GET") != 0 && strcmp(request.method, "POST") != 0) {
+	
+	} else if (strcmp(request.method, "HEAD") == 0) {
+		printf("That is Head\n");
+		if (request.path[0] == '/') {
+			memmove(request.path, request.path + 1, strlen(request.path));
+		}
+		
+		handle_head_request(request, client_socket);
+		
+	} else if (strcmp(request.method, "GET") != 0 || strcmp(request.method, "POST") != 0 || strcmp(request.method, "HEAD") != 0) {
 		handle_not_allowed_method(client_socket);
 	}
 	
@@ -337,8 +426,8 @@ void parse_request(const char *buffer, struct HTTP_Request* http_request) {
 	
 	http_request->method[j] = '\0';
 	
-	if (strcmp(http_request->method, "GET") == 0) {
-		// For GET request
+	if (strcmp(http_request->method, "GET") == 0 || strcmp(http_request->method, "HEAD") == 0) {
+		// For GET and HEAD request
 		i++;
 		j = 0;
 
@@ -462,7 +551,7 @@ void *client_handler(void *arg) {
 	select(client_socket + 1, &readfds, NULL, NULL, NULL);
 	char buffer[MAX_SIZE];
 	ssize_t bytes_read = read(client_socket, buffer, MAX_SIZE);
-	printf("Buffer content:\n%s\n", buffer);
+	printf("\nBuffer content:\n%s\n", buffer);
 //	ssize_t buf_size;
 
 //	ioctl(bytes_read, FIONREAD, &buf_size);
