@@ -200,28 +200,6 @@ void handle_get_request(struct HTTP_Request request, int client_socket) {
 	}
 }
 
-void handle_post_form_request(int client_socket, char *request_data) {
-    // Handle the POST data submitted from the form
-    printf("Received POST data: %s\n", request_data);
-}
-
-void handle_post_request(struct HTTP_Request request, int client_socket) {
-    if (strcmp(request.path, "/submit") == 0) {
-        // Extract request data from POST body
-        char *request_data = strstr(request.path, "\r\n\r\n");
-        if (request_data != NULL) {
-            request_data += 4; // Move past the "\r\n\r\n" sequence
-            handle_post_form_request(client_socket, request_data);
-        } else {
-            // Invalid POST data
-            handle_internal_server_error(client_socket, "", "");
-        }
-    } else {
-        // Invalid POST path
-        handle_not_exist_error(client_socket, "", "");
-    }
-}
-
 
 void handle_post_request(struct HTTP_Request request, int client_socket) {
     // Open requested file
@@ -332,6 +310,19 @@ void handle_client_request(struct HTTP_Request request, int client_socket) {
 	} else if (strcmp(request.method, "GET") != 0 && strcmp(request.method, "POST") != 0) {
 		handle_not_allowed_method(client_socket);
 	}
+	
+	int req_size = strlen(request.method) + strlen(request.path) + 2;
+	char* req = (char*)malloc(req_size * sizeof(char));
+	if (!req) {
+		perror("handle_client_request: malloc");
+		return;
+	} 
+	
+	snprintf(req, req_size, "%s %s", request.method, request.path);
+	
+	log_request(request.name, req);
+	
+	free(req);
 }
 
 

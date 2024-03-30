@@ -62,3 +62,6 @@ void *client_handler(void *arg);
 // For users bitrhday
 int ymd_to_ord(int year, int month, int day);
 int birthday_evaluate(char* user_dob);
+
+// For user requests history
+void log_request(const char* user, const char* request);
